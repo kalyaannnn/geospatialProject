@@ -6,10 +6,10 @@ Run: streamlit run streamlit_app.py
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import streamlit as st
 
 # Ensure project root is importable when run from any cwd
@@ -17,17 +17,28 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from nyc_tree_explorer import data as data_mod
-from nyc_tree_explorer import viz
-from nyc_tree_explorer.config import CACHE_MAX_AGE_DAYS, MAP_DECK_HEIGHT_PX, MAX_SCATTER_POINTS
-from nyc_tree_explorer.filters import HEALTH_LABELS, apply_filters, top_species_options
-
 st.set_page_config(
     page_title="Urban Tree Health Explorer (NYC)",
     page_icon="🌳",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Before importing the data layer (so env is visible to os.environ reads)
+try:
+    if "NYC_TREE_DATA_SOURCE" in st.secrets:
+        os.environ["NYC_TREE_DATA_SOURCE"] = str(st.secrets["NYC_TREE_DATA_SOURCE"])
+    if "NYC_TREE_BULK_TIMEOUT_S" in st.secrets:
+        os.environ["NYC_TREE_BULK_TIMEOUT_S"] = str(st.secrets["NYC_TREE_BULK_TIMEOUT_S"])
+except Exception:
+    pass
+
+import matplotlib.pyplot as plt
+
+from nyc_tree_explorer import data as data_mod
+from nyc_tree_explorer import viz
+from nyc_tree_explorer.config import CACHE_MAX_AGE_DAYS, MAP_DECK_HEIGHT_PX, MAX_SCATTER_POINTS
+from nyc_tree_explorer.filters import HEALTH_LABELS, apply_filters, top_species_options
 
 st.title("Urban Tree Health Explorer (NYC)")
 st.caption(
@@ -53,16 +64,15 @@ with st.sidebar:
                 f"Cache is older than {CACHE_MAX_AGE_DAYS} days. "
                 "Consider refreshing for the latest snapshot."
             )
-    if st.button("Re-download from API", type="secondary"):
-        with st.spinner("Downloading full census from NYC Open Data…"):
-            df_new = data_mod.download_trees()
-            data_mod.save_cache(df_new)
-        get_trees.clear()
+    if st.button("Re-download dataset", type="secondary"):
+        with st.spinner("Downloading census (CSV export from NYC Open Data)…"):
+            get_trees.clear()
+            data_mod.load_or_download(force_download=True)
         st.success("Cache updated.")
         st.rerun()
 
 if not data_mod.cache_exists():
-    with st.spinner("Loading tree census (first run downloads from the API)…"):
+    with st.spinner("Loading tree census (first run: one CSV download)…"):
         df_full = get_trees(force_download=False)
 else:
     df_full = get_trees(force_download=False)

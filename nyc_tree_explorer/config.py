@@ -7,6 +7,11 @@ from pathlib import Path
 # NYC Open Data — 2015 Street Tree Census (Socrata API)
 DATASET_ID = "uvpi-gqnh"
 SOCRATA_BASE = "https://data.cityofnewyork.us/resource"
+# Single-file export (much faster than paginated JSON; preferred for Streamlit Cloud)
+BULK_CSV_URL = (
+    f"https://data.cityofnewyork.us/api/views/{DATASET_ID}/rows.csv"
+    "?accessType=DOWNLOAD"
+)
 PAGE_SIZE = 50_000
 REQUEST_TIMEOUT_S = 120
 

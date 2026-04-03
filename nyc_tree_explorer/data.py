@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +14,7 @@ import pandas as pd
 import requests
 
 from nyc_tree_explorer.config import (
+    BULK_CSV_URL,
     CACHE_DIR,
     CACHE_FILENAME,
     CACHE_MAX_AGE_DAYS,
@@ -23,7 +26,14 @@ from nyc_tree_explorer.config import (
     SOCRATA_BASE,
 )
 
+logger = logging.getLogger(__name__)
+
 ProgressCallback = Callable[[int, int], None]
+
+
+def _bulk_read_timeout_s() -> int:
+    """Seconds for streaming the CSV body (env overrides Streamlit secrets if set first)."""
+    return int(os.environ.get("NYC_TREE_BULK_TIMEOUT_S", "900"))
 
 
 def _cache_parquet_path() -> Path:
@@ -44,6 +54,11 @@ def _write_metadata(row_count: int, source_url: str) -> None:
         "source": source_url,
     }
     _metadata_path().write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def data_source_mode() -> str:
+    """bulk = single CSV export (default) | api = paginated Socrata JSON."""
+    return os.environ.get("NYC_TREE_DATA_SOURCE", "bulk").strip().lower()
 
 
 def cache_exists() -> bool:
@@ -72,15 +87,12 @@ def _fetch_page(offset: int, limit: int) -> list[dict]:
     return resp.json()
 
 
-def download_trees(
+def download_trees_via_api(
     progress: ProgressCallback | None = None,
 ) -> pd.DataFrame:
-    """
-    Paginate through the Socrata API and return the full census as a DataFrame.
-    """
+    """Paginate through the Socrata JSON API (slow; use for fallback only)."""
     rows: list[dict] = []
     offset = 0
-    source_url = f"{SOCRATA_BASE}/{DATASET_ID}.json"
 
     while True:
         batch = _fetch_page(offset, PAGE_SIZE)
@@ -89,7 +101,7 @@ def download_trees(
         rows.extend(batch)
         offset += len(batch)
         if progress:
-            progress(len(rows), len(rows))  # total unknown until done; update below
+            progress(len(rows), len(rows))
 
         if len(batch) < PAGE_SIZE:
             break
@@ -101,10 +113,47 @@ def download_trees(
     return _normalize_frame(df)
 
 
+def download_trees_bulk_csv() -> pd.DataFrame:
+    """
+    One HTTP download of the official CSV export (fast path for Streamlit Cloud).
+    CSV column names differ slightly from the JSON API (e.g. ``borough`` vs ``boroname``).
+    """
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = CACHE_DIR / f".{DATASET_ID}_download.csv"
+    try:
+        with requests.get(
+            BULK_CSV_URL,
+            stream=True,
+            timeout=(60, _bulk_read_timeout_s()),
+        ) as r:
+            r.raise_for_status()
+            with open(tmp, "wb") as f:
+                for chunk in r.iter_content(chunk_size=4 * 1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+        df = pd.read_csv(tmp, low_memory=False)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+    return _normalize_frame(df)
+
+
+def _canonical_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Align bulk CSV / API column names with what the app expects."""
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    if "borough" in df.columns and "boroname" not in df.columns:
+        df = df.rename(columns={"borough": "boroname"})
+    return df
+
+
 def _normalize_frame(df: pd.DataFrame) -> pd.DataFrame:
     """Coerce types, drop unusable coordinates, standardize text fields."""
     if df.empty:
         return df
+
+    df = _canonical_columns(df)
 
     for col in ("latitude", "longitude"):
         if col in df.columns:
@@ -126,10 +175,11 @@ def _normalize_frame(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def save_cache(df: pd.DataFrame) -> Path:
+def save_cache(df: pd.DataFrame, source_url: str | None = None) -> Path:
     path = _cache_parquet_path()
     df.to_parquet(path, index=False, engine="pyarrow")
-    _write_metadata(len(df), f"{SOCRATA_BASE}/{DATASET_ID}.json")
+    src = source_url or f"{SOCRATA_BASE}/{DATASET_ID}.json"
+    _write_metadata(len(df), src)
     return path
 
 
@@ -143,16 +193,44 @@ def load_or_download(
     progress: ProgressCallback | None = None,
 ) -> pd.DataFrame:
     """
-    Return trees from local Parquet cache, or download from the API if missing
-    or if ``force_download`` is True.
+    Return trees from local Parquet cache, or download.
+
+    Default is **bulk CSV** (single stream). Set env ``NYC_TREE_DATA_SOURCE=api``
+    to force paginated JSON, or use that as automatic fallback if CSV fails.
     """
     path = _cache_parquet_path()
     if path.is_file() and not force_download:
         return load_cached()
 
-    df = download_trees(progress=progress)
-    save_cache(df)
-    return df
+    mode = data_source_mode()
+    api_url = f"{SOCRATA_BASE}/{DATASET_ID}.json"
+
+    if mode == "api":
+        df = download_trees_via_api(progress=progress)
+        save_cache(df, source_url=api_url)
+        return df
+
+    try:
+        df = download_trees_bulk_csv()
+        save_cache(df, source_url=BULK_CSV_URL)
+        return df
+    except Exception as e:
+        logger.warning("Bulk CSV download failed, using JSON API fallback: %s", e)
+        df = download_trees_via_api(progress=progress)
+        save_cache(df, source_url=api_url)
+        return df
+
+
+def download_trees(progress: ProgressCallback | None = None) -> pd.DataFrame:
+    """Public download used by “Re-download” — respects ``NYC_TREE_DATA_SOURCE``."""
+    mode = data_source_mode()
+    if mode == "api":
+        return download_trees_via_api(progress=progress)
+    try:
+        return download_trees_bulk_csv()
+    except Exception as e:
+        logger.warning("Bulk CSV failed in manual refresh: %s", e)
+        return download_trees_via_api(progress=progress)
 
 
 def get_data_summary(df: pd.DataFrame) -> dict:
