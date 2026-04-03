@@ -1,4 +1,5 @@
-# Conda env: conda env create -f environment.yml && conda activate nyc-tree-explorer
+# Optional local Conda env (not used by Streamlit Cloud — Cloud uses requirements.txt + runtime.txt only)
+# conda env create -f environment.yml.example && conda activate nyc-tree-explorer
 name: nyc-tree-explorer
 channels:
   - conda-forge

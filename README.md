@@ -11,7 +11,7 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-Python 3.11 is recommended (`runtime.txt` / `environment.yml`).
+Python 3.11 is recommended (`runtime.txt`). For Conda locally, see `environment.yml.example`.
 
 ## Configuration (optional)
 
@@ -25,3 +25,5 @@ In Streamlit Cloud you can set these in **App settings → Secrets** (same keys,
 ## Deploy
 
 Use [Streamlit Community Cloud](https://share.streamlit.io): main file `streamlit_app.py`, dependencies from `requirements.txt`.
+
+Do **not** keep a root `environment.yml` in the repo if you use Cloud: it forces a slow Conda solve. This project uses **`requirements.txt` + `runtime.txt`** on Cloud; Conda is optional via `environment.yml.example` for local use only.
