@@ -1,0 +1,9 @@
+# Local data cache (downloaded from NYC Open Data)
+data/cache/
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+.env
+.DS_Store
