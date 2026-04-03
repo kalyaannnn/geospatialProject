@@ -11,7 +11,7 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-Python 3.11 is recommended (`runtime.txt`). For Conda locally, see `environment.yml.example`.
+Python **3.12** is what Streamlit Community Cloud uses by default (`runtime.txt`). For Conda locally, see `environment.yml.example`.
 
 ## Configuration (optional)
 

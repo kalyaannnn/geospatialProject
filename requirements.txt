@@ -1,7 +1,6 @@
-# Urban Tree Health Explorer (NYC)
-streamlit>=1.28,<2
-pandas>=2.0,<3
-pydeck>=0.8,<1
-matplotlib>=3.7,<4
-requests>=2.31,<3
-pyarrow>=14,<20
+streamlit==1.41.1
+pandas==2.2.3
+pydeck==0.9.1
+matplotlib==3.9.2
+requests==2.32.3
+pyarrow==19.0.0
